@@ -27,6 +27,63 @@ NTPClient timeClient(ntpUDP, NTP_SERVER, TZ(TIME_ZONE) );       //  Object NTPCl
 
 SevSeg sevseg;
 
+long int last_milis = 0;
+long int interval = 1000;
+
+struct rtc
+{
+  int hours;
+  int minutes;
+  int seconds;
+};
+
+rtc real_time_clock;
+
+void setRealTimeClockWithNTP(){
+  time_t time;
+  char hours[] = "";
+  char minutes[] = "";
+  char seconds[] = "";
+
+  time = timeClient.getEpochTime();
+  strftime(hours, sizeof(hours),"%H%", localtime(&time));
+  Serial.println(hours);
+  strftime(minutes, sizeof(minutes),"%M%", localtime(&time));
+  Serial.println(minutes);
+  strftime(seconds, sizeof(seconds),"%S%", localtime(&time));
+
+  real_time_clock = {
+    hours: (int) hours, 
+    minutes:  (int) minutes, 
+    seconds: 0
+  };
+}
+
+void update_rtc_seconds(){
+  if (real_time_clock.seconds < 59) {
+    real_time_clock.seconds++;
+  }
+  else {
+    real_time_clock.seconds = 0;
+    if (real_time_clock.minutes < 59) {
+      real_time_clock.minutes++;
+    }
+    else {
+      real_time_clock.minutes = 0;
+      if (real_time_clock.hours < 23) {
+        real_time_clock.hours++;
+      }
+      else {
+        real_time_clock.hours = 0;
+        real_time_clock.minutes = 0;
+        real_time_clock.seconds = 0;
+      }
+      
+    }
+  }
+  
+}
+
 void setup(){
 
   Serial.begin(SERIAL_BAUD);
@@ -37,39 +94,46 @@ void setup(){
   byte digitPins[] = {26, 25, 33, 32};
   byte segmentPins[] = {17, 2, 14, 5, 27, 16, 13, 4};
 
-  bool resistorsOnSegments = true; 
+  bool resistorsOnSegments = true;
   bool updateWithDelaysIn = true;
-  byte hardwareConfig = COMMON_CATHODE; 
+  byte hardwareConfig = COMMON_CATHODE;
   sevseg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments);
   sevseg.setBrightness(95);
+
+  setRealTimeClockWithNTP();
 }
 
 void loop(){
-    time_t epoch_time;
-    char buf[80];
-
-    timeClient.update();                    //  Get time and date from server
-
-    Serial.print( daysOfTheWeek[timeClient.getDay()] );
-    Serial.print( ": ");
-    Serial.println(timeClient.getFormattedTime());
-
-    Serial.print( "Epoch = " );
-    epoch_time = timeClient.getEpochTime();
-    Serial.println( epoch_time );
-    strftime(buf, sizeof(buf),"%H%M", localtime(&epoch_time));
-    Serial.println(buf);
-
-    Serial.println();
-
-    unsigned long prMillis = millis();
-
-    sevseg.setNumber(std::stoi(buf), 2);
-
-    while (millis() - prMillis < 500)
-    {
-      sevseg.refreshDisplay();
+    if(millis() >= last_milis + interval) {
+      last_milis = millis();
+      update_rtc_seconds();
     }
-    
-    delay(1000);
+
+    // time_t epoch_time;
+
+    // char hours[] = "";
+    // char minutes[] = "";
+    // char seconds[] = "";
+
+    // timeClient.update();
+
+    // Serial.print( daysOfTheWeek[timeClient.getDay()] );
+    // Serial.print( ": ");
+    // Serial.println(timeClient.getFormattedTime());
+
+    // Serial.print( "Epoch = " );
+    // epoch_time = timeClient.getEpochTime();
+    // Serial.println( epoch_time );
+    // strftime(hours, sizeof(hours),"%H%", localtime(&epoch_time));
+    // Serial.println(hours);
+    // strftime(minutes, sizeof(minutes),"%M%", localtime(&epoch_time));
+    // Serial.println(minutes);
+    // strftime(seconds, sizeof(seconds),"%S%", localtime(&epoch_time));
+    // Serial.println(seconds);
+
+    // Serial.println();
+    std::string hourToString = std::to_string(real_time_clock.hours) + std::to_string(real_time_clock.minutes) + std::to_string(real_time_clock.seconds);
+    printf(hourToString.c_str());
+    sevseg.setNumber(std::stoi(hourToString), 2);
+    sevseg.refreshDisplay();
 }

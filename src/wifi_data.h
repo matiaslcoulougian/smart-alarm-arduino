@@ -21,8 +21,8 @@
  *  SSID and PASS for Home
  */
 
-#define MY_SSID "Fedenetwork"
-#define MY_PASS "daleboke"
+#define MY_SSID "Alejo5G"
+#define MY_PASS "244466666"
 
 #endif
 
