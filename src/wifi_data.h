@@ -21,9 +21,9 @@
  *  SSID and PASS for Home
  */
 
-#define MY_SSID "Alejo5G"
-#define MY_PASS "244466666"
+#define MY_SSID "matuwifi"
+#define MY_PASS "estoyreloco"
 
-#endif
+#endify
 
 

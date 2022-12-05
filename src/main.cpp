@@ -1,94 +1,43 @@
 #include <Arduino.h>
+
 #include "SevSeg.h"
 
-#include <WiFi.h>
-
-#include <NTPClient.h>          // for access to time servers
-#include <WiFiUdp.h>            // for using UDP protocol
-#include <time.h>               // to access to Unix library calls
+#include "ntp.h"
 
 #include "wifi_ruts.h"
 
-#define TZ(tz)      (tz*3600)               //  Macro to convert from time zone in hours to seconds
-
-//  Week names
-
-const char *daysOfTheWeek[] =
-{
-    "Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"
-};
-
-/*
- *  Creacion de objetos
- */
-
-WiFiUDP ntpUDP;                                                 //  Object for using UDP
-NTPClient timeClient(ntpUDP, NTP_SERVER, TZ(TIME_ZONE) );       //  Object NTPClient
+#include "mqtt_sub.h"
 
 SevSeg sevseg;
 
-long int last_milis = 0;
-long int interval = 1000;
+Time_Record time_this;
 
-struct rtc
-{
-  int hours;
-  int minutes;
-  int seconds;
-};
+int seconds = 0;
 
-rtc real_time_clock;
+bool activate_alarm = false;
 
-void setRealTimeClockWithNTP(){
-  time_t time;
-  char hours[] = "";
-  char minutes[] = "";
-  char seconds[] = "";
+unsigned long previousMillis = 0;
 
-  time = timeClient.getEpochTime();
-  strftime(hours, sizeof(hours),"%H%", localtime(&time));
-  Serial.println(hours);
-  strftime(minutes, sizeof(minutes),"%M%", localtime(&time));
-  Serial.println(minutes);
-  strftime(seconds, sizeof(seconds),"%S%", localtime(&time));
+const long ntpInterval = 60000 * 60;
 
-  real_time_clock = {
-    hours: (int) hours, 
-    minutes:  (int) minutes, 
-    seconds: 0
-  };
-}
+const long internalClockInterval = 10000;
 
-void update_rtc_seconds(){
-  if (real_time_clock.seconds < 59) {
-    real_time_clock.seconds++;
-  }
-  else {
-    real_time_clock.seconds = 0;
-    if (real_time_clock.minutes < 59) {
-      real_time_clock.minutes++;
-    }
-    else {
-      real_time_clock.minutes = 0;
-      if (real_time_clock.hours < 23) {
-        real_time_clock.hours++;
-      }
-      else {
-        real_time_clock.hours = 0;
-        real_time_clock.minutes = 0;
-        real_time_clock.seconds = 0;
-      }
-      
-    }
-  }
-  
-}
+const long buzzerInterval = 800;
 
 void setup(){
 
-  Serial.begin(SERIAL_BAUD);
+  pinMode(BUZZ, OUTPUT);
+
+  pinMode(BUTTON, INPUT_PULLUP);
+
   wifi_connect();
-  timeClient.begin();
+
+  setupTime();
+
+  Serial.begin(SERIAL_BAUD);
+
+  Serial.println("INITIATING");
+  init_mqtt();
 
   byte numDigits = 4;
   byte digitPins[] = {26, 25, 33, 32};
@@ -99,41 +48,81 @@ void setup(){
   byte hardwareConfig = COMMON_CATHODE;
   sevseg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments);
   sevseg.setBrightness(95);
+  time_this = getTimeUpdated();
+}
 
-  setRealTimeClockWithNTP();
+int formatTime() {
+  return time_this.hours * 100 + time_this.minutes;
+}
+
+void updateLocalTime() {
+  if (time_this.seconds < 59) {
+    time_this.seconds += 1;
+    return;
+  }
+  else {
+    if (time_this.minutes < 59) {
+      time_this.seconds = 0;
+      time_this.minutes += 1;
+      return;
+    }
+    else {
+      if (time_this.hours < 23) {
+        time_this.seconds = 0;
+        time_this.minutes = 0;
+        time_this.hours += 1;
+        return;
+      }
+      else {
+        time_this.seconds = 0;
+        time_this.minutes = 0;
+        time_this.hours = 0;
+        return;
+      }
+    }
+  }  
 }
 
 void loop(){
-    if(millis() >= last_milis + interval) {
-      last_milis = millis();
-      update_rtc_seconds();
+
+  unsigned long currentMillis = millis();
+
+  int n = activation_times_length / sizeof(*activation_times);
+  
+  if (std::find(activation_times, activation_times + n, formatTime()) != activation_times + n) {
+    activate_alarm = true;
+  }
+
+  if (currentMillis - previousMillis >= 1000) {
+    previousMillis = currentMillis;
+    updateLocalTime();
+  }
+  
+
+  if (currentMillis - previousMillis >= ntpInterval) {
+    previousMillis = currentMillis;
+    time_this = getTimeUpdated();
+  }
+
+  if (activate_alarm == true){
+    if (currentMillis - previousMillis >= buzzerInterval) {
+      previousMillis = currentMillis;
+      digitalWrite(BUZZ, !digitalRead(BUZZ));
     }
+  }
+  
 
-    // time_t epoch_time;
+  if (digitalRead(BUTTON) == LOW){
+    activate_alarm = false;
+    digitalWrite(BUZZ, 0);
+    int time_index = std::find(activation_times, activation_times + n,  formatTime()) - activation_times;
+    activation_times[time_index] = 0;
+  }
 
-    // char hours[] = "";
-    // char minutes[] = "";
-    // char seconds[] = "";
+  mqtt_comms();
+  
 
-    // timeClient.update();
-
-    // Serial.print( daysOfTheWeek[timeClient.getDay()] );
-    // Serial.print( ": ");
-    // Serial.println(timeClient.getFormattedTime());
-
-    // Serial.print( "Epoch = " );
-    // epoch_time = timeClient.getEpochTime();
-    // Serial.println( epoch_time );
-    // strftime(hours, sizeof(hours),"%H%", localtime(&epoch_time));
-    // Serial.println(hours);
-    // strftime(minutes, sizeof(minutes),"%M%", localtime(&epoch_time));
-    // Serial.println(minutes);
-    // strftime(seconds, sizeof(seconds),"%S%", localtime(&epoch_time));
-    // Serial.println(seconds);
-
-    // Serial.println();
-    std::string hourToString = std::to_string(real_time_clock.hours) + std::to_string(real_time_clock.minutes) + std::to_string(real_time_clock.seconds);
-    printf(hourToString.c_str());
-    sevseg.setNumber(std::stoi(hourToString), 2);
-    sevseg.refreshDisplay();
+  //Display set and refresh
+  sevseg.setNumber(formatTime(), 2);
+  sevseg.refreshDisplay();
 }
